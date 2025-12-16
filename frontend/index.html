@@ -1,1 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI Shopping Assistant — Product Finder (Final)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      margin: 0;
+      background: linear-gradient(120deg, #f6d365, #fda085);
+      min-height: 100vh;
+      position: relative;
+      overflow: hidden;
+    }
+    body::before, body::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.3);
+      z-index: 0;
+    }
+    body::before { width: 350px; height: 350px; top: -80px; left: -80px; }
+    body::after { width: 400px; height: 400px; bottom: -100px; right: -100px; }
+
+    h2 { text-align: center; color: #ffffff; font-size: 32px; margin-top: 20px;
+         text-shadow: 1px 1px 3px rgba(0,0,0,0.2); position: relative; z-index: 1; }
+
+    #search-box { display: flex; justify-content: center; margin-bottom: 20px; position: relative; z-index: 1; }
+    input#query { padding: 10px; width: 320px; border-radius: 8px; border: 1px solid #ffffff; font-size: 16px; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
+    button { padding: 10px 15px; margin-left: 10px; border: none; background: #ffffff; color: #d35400; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; box-shadow: 0 2px 6px rgba(0,0,0,0.15); transition: 0.2s ease; }
+    button:hover { background: #ffe2d1; transform: translateY(-2px); }
+
+    #results { max-width: 900px; margin: 0 auto; position: relative; z-index: 2; }
+    .product { background: rgba(255,255,255,0.95); border-radius: 12px; padding: 15px; margin-bottom: 15px; box-shadow: 0 4px 8px rgba(0,0,0,0.15); backdrop-filter: blur(4px); transition: transform 0.18s ease; position: relative; z-index: 2; }
+    .product:hover { transform: translateY(-3px); }
+    .product h4 { margin: 0; color: #d35400; font-size: 20px; }
+    .product p { margin: 8px 0; font-size: 15px; color: #333; }
+    a.view-btn { display: inline-block; padding: 8px 12px; background: #d35400; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 600; }
+    a.view-btn:hover { background: #b84200; }
+    .note { text-align: center; color: #fff; margin: 8px 0; font-weight: 600; z-index:1; }
+  </style>
+</head>
+<body>
+  <h2>AI Shopping Assistant</h2>
+
+  <div id="search-box">
+    <input id="query" placeholder="Search for products... (ex: AirPods, running shoes)" />
+    <button id="btnSearch">Search</button>
+  </div>
+
+  <div id="results"></div>
+
+  <script>
+  // ====== CONFIG - set TEST_LINK to the exact product URL you have (optional) ======
+  // If your webhook returns a link, the page will use it automatically.
+  // If the webhook is missing link, set TEST_LINK to force the product link for testing.
+  const TEST_LINK = "https://www.example.com/your-product-page-here"; // <-- REPLACE with your actual product link
+  // ============================================================================
+
+  // Replace with your webhook URL
+  const WEBHOOK_URL = "https://yourshoppingassistant.app.n8n.cloud/webhook/product-search";
+
+  // normalize candidate link into an absolute https link when possible
+  function makeAbsoluteUrl(candidate, baseCandidate) {
+    if (!candidate && !baseCandidate) return null;
+    try {
+      if (candidate) {
+        const s = String(candidate).trim();
+        if (!s) return null;
+        if (/^https?:\/\//i.test(s)) return s;
+        if (/^\/\//.test(s)) return "https:" + s;
+        if (/^\//.test(s) && baseCandidate) {
+          try { return new URL(s, baseCandidate).href; } catch(e) { return null; }
+        }
+        if (/^[\w-]+(\.[\w-]+)+/.test(s)) return "https://" + s;
+      }
+    } catch (e) {
+      console.warn("makeAbsoluteUrl error:", e);
+    }
+    return null;
+  }
+
+  // pick link from many possible fields
+  function pickLinkFromProduct(p) {
+    if (!p) return null;
+    const candidates = [p.link, p.product_url, p.url, p.source_page, p.detail_url, p.productUrl, p.itemUrl];
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim()) {
+        const abs = makeAbsoluteUrl(c, p.source_page || p.product_url || null);
+        if (abs) return abs;
+      }
+    }
+    // fallback to TEST_LINK if set
+    if (TEST_LINK && TEST_LINK.length && TEST_LINK.indexOf("example.com") === -1) return TEST_LINK;
+    return null;
+  }
+
+  // build DOM card; opens link safely in new tab
+  function renderProductCard(product) {
+    const link = pickLinkFromProduct(product);
+    const card = document.createElement("div");
+    card.className = "product";
+
+    const title = document.createElement("h4");
+    title.textContent = product.title || product.name || "Untitled product";
+    card.appendChild(title);
+
+    const price = document.createElement("p");
+    price.innerHTML = "<strong>Price:</strong> " + (product.price ?? "N/A");
+    card.appendChild(price);
+
+    const store = document.createElement("p");
+    store.innerHTML = "<strong>Store:</strong> " + (product.store || product.retailer || "general retail");
+    card.appendChild(store);
+
+    const linkP = document.createElement("p");
+    if (link) {
+      const a = document.createElement("a");
+      a.href = link;
+      a.className = "view-btn";
+      a.textContent = "View Product";
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.addEventListener("click", function(e) {
+        e.preventDefault();
+        try { window.open(link, "_blank", "noopener"); } catch (err) { window.location.href = link; }
+      });
+      linkP.appendChild(a);
+    } else {
+      linkP.textContent = "(No product link provided)";
+      linkP.style.color = "#a00";
+    }
+    card.appendChild(linkP);
+
+    return card;
+  }
+
+  // call webhook and render results
+  async function search() {
+    const q = document.getElementById("query").value.trim();
+    if (!q) {
+      alert("Please enter a search query.");
+      return;
+    }
+
+    const resultsDiv = document.getElementById("results");
+    resultsDiv.innerHTML = `<div class="note">Searching for "${q}"…</div>`;
+
+    try {
+      const res = await fetch(WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q })
+      });
+
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      window.__lastApiResponse = data;
+
+      resultsDiv.innerHTML = "";
+      if (data.summary) {
+        const s = document.createElement("div");
+        s.className = "note";
+        s.textContent = data.summary;
+        resultsDiv.appendChild(s);
+      }
+
+      const products = Array.isArray(data.top_products) ? data.top_products : [];
+      if (products.length === 0) {
+        // no products from webhook — show an example card using TEST_LINK (if set)
+        const fallbackProduct = {
+          title: "Example product (no webhook items)",
+          price: "N/A",
+          store: "general retail",
+          link: TEST_LINK
+        };
+        resultsDiv.appendChild(renderProductCard(fallbackProduct));
+        return;
+      }
+
+      // render each product — will use webhook link if present; else TEST_LINK if you set it
+      products.forEach(p => {
+        resultsDiv.appendChild(renderProductCard(p));
+      });
+
+    } catch (err) {
+      console.error("Search error:", err);
+      resultsDiv.innerHTML = `<div class="product"><p style="color:#a00">Request failed: ${err.message}</p></div>`;
+    }
+  }
+
+  document.getElementById("btnSearch").addEventListener("click", search);
+  document.getElementById("query").addEventListener("keydown", (e) => { if (e.key === "Enter") search(); });
+  </script>
+</body>
+</html>
 
