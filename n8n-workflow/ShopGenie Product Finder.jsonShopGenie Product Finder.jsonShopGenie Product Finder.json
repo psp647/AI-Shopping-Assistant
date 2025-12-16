@@ -1,0 +1,298 @@
+{
+  "name": "ShopGenie Product Finder",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "/product-search",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -336,
+        -96
+      ],
+      "id": "74a952a4-0132-422e-910d-a352b9d80fb7",
+      "name": "Webhook",
+      "webhookId": "1eb2df84-e980-4513-a847-d1c9652f0635"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Safely read the incoming body\nconst body = $json.body || {};\n\n// Extract query\nconst query = body.query || \"\";\n\n// Extract products (ensure it is always an array)\nconst products = Array.isArray(body.products) ? body.products : [];\n\n// Return unified JSON\nreturn [\n  {\n    json: {\n      query: query,\n      products: products\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -96,
+        -96
+      ],
+      "id": "2eff3b50-087e-4db7-9221-e45704017265",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "={{\"https://serpapi.com/search.json?engine=walmart&query=\" + $json.query + \"&api_key=0972752c3c7e3783d8661bdf5ddaf709e83c96419dcfa88cffe10a6c5d06d7f0\"}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        320
+      ],
+      "id": "ffb8acbd-90b3-40e5-9b88-4ac3796463a9",
+      "name": "Walmart"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Collect all incoming items from previous nodes\nconst allInputs = $input.all();\n\nlet finalQuery = \"\";\nlet finalProducts = [];\n\n// Loop through all inputs\nfor (const input of allInputs) {\n  \n  const data = input.json || {};\n\n  // Extract query if present (Webhook or other node)\n  if (data.query && typeof data.query === \"string\" && data.query.trim() !== \"\") {\n    finalQuery = data.query;\n  }\n\n  // Extract products array if present\n  if (Array.isArray(data.products)) {\n    finalProducts = finalProducts.concat(data.products);\n  }\n\n  // If webhook body has products → data.body.products\n  if (data.body && Array.isArray(data.body.products)) {\n    finalProducts = finalProducts.concat(data.body.products);\n\n    // Query from body also allowed\n    if (data.body.query) {\n      finalQuery = data.body.query;\n    }\n  }\n}\n\n// Return a unified clean object\nreturn [\n  {\n    json: {\n      query: finalQuery,\n      products: finalProducts\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -96
+      ],
+      "id": "ab613c25-c4b7-41df-87f6-06fe1ffe27e9",
+      "name": "Merge Products"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        416,
+        -272
+      ],
+      "id": "6d1a47e6-e7de-4527-b2f3-2d656d270627",
+      "name": "When chat message received",
+      "webhookId": "c98b7f99-5764-4f78-be5d-7fe0a77ab6e5",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You will receive a search query and optionally a list of product results.\n\nQuery: {{$json.query}}\nProducts: {{JSON.stringify($json.products)}}\n\nYour job:\n1. If the product list has items, analyze them and return the best 3.\n2. If the product list is empty or undefined, then recommend the top 3 best options based ONLY on the query, using your general knowledge.\n\nRanking criteria (when products exist):\n- rating (highest first)\n- discountPercentage (highest first)\n- price (lowest first)\n- value for money\n- relevance to the query\n\nRanking criteria (when NO products exist):\n- current popular products\n- strong reviews\n- trusted brands\n- value for price\n\nReturn format:\n- A friendly summary\n- A JSON list of top 3 products with:\n  - title\n  - estimated price\n  - store (Amazon / Walmart / Best Buy / general retail)\n  - rating (if available)\n  - link (if available or leave empty)\n  - why_ranked: a clear explanation\n\nOutput structure:\n\n{\n  \"summary\": \"\",\n  \"top_products\": [\n    {\n      \"title\": \"\",\n      \"price\": \"\",\n      \"store\": \"\",\n      \"rating\": \"\",\n      \"discountPercentage\": \"\",\n      \"link\": \"\",\n      \"why_ranked\": \"\"\n    }\n  ]\n}\n\nRules:\n- NEVER fail if products are missing.\n- Generate reasonable price / rating estimates when needed.\n- Provide helpful suggestions based only on the query when product data is empty.\n- ALWAYS return valid JSON.\n",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are ShopGenie, an AI shopping assistant.  You will receive a list of product results from Amazon, Walmart, and BestBuy. Each result contains: - title - price - rating - link  Your job: 1. Compare all products. 2. Rank them from best to worst based on value, quality, and relevance. 3. Output the top 3 products only. 4. Respond with a friendly explanation + a clean JSON list.  Example output format:  {   \"summary\": \"short human explanation here\",   \"top_products\": [     { \"title\": \"...\", \"price\": \"...\", \"rating\": \"...\", \"link\": \"...\" },     { \"title\": \"...\", \"price\": \"...\", \"rating\": \"...\", \"link\": \"...\" },     { \"title\": \"...\", \"price\": \"...\", \"rating\": \"...\", \"link\": \"...\" }   ] }  Now analyze the products below:  {{$json}}"
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        592,
+        -160
+      ],
+      "id": "0cd81dd2-3c43-459f-89f5-862fd5a2f08c",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4.1-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        480,
+        -64
+      ],
+      "id": "a1cddb06-7973-45ae-83b9-ad0481ff7320",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "pVdcU6NvgzvyR9GN",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1184,
+        -160
+      ],
+      "id": "b2dd8f79-8a1d-458f-98a5-bf26dd67272e",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "url": "={{\"https://serpapi.com/search.json?engine=amazon&k=\" + $json.query + \"&api_key=0972752c3c7e3783d8661bdf5ddaf709e83c96419dcfa88cffe10a6c5d06d7f0\"}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        176
+      ],
+      "id": "47823bdd-ff0f-4710-b219-f294dcfbe98f",
+      "name": "Amazon"
+    },
+    {
+      "parameters": {
+        "url": "={{\"https://serpapi.com/search.json?engine=google_shopping&q=\" + $json.query + \"&api_key=0972752c3c7e3783d8661bdf5ddaf709e83c96419dcfa88cffe10a6c5d06d7f0\"}}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        624,
+        0
+      ],
+      "id": "56999b12-18d0-4bf8-8114-9291174a85e2",
+      "name": "Google Shopping"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.text;   // The big string returned by LLM\n\nlet parsed = {};\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  parsed = { error: \"Failed to parse LLM JSON\", raw };\n}\n\nreturn [{ json: parsed }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        -160
+      ],
+      "id": "f4653e42-6ae5-4787-980c-0b74f4e6281a",
+      "name": "PARSE LLM JSON"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Merge Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Walmart": {
+      "main": [
+        []
+      ]
+    },
+    "Merge Products": {
+      "main": [
+        [
+          {
+            "node": "Walmart",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Amazon",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Shopping",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "PARSE LLM JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Shopping": {
+      "main": [
+        []
+      ]
+    },
+    "PARSE LLM JSON": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "5302bdfb-cd41-4a21-8a16-051c2009f134",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4aa88aa9b9b138daa78d1091d51dc1a7abfbe8b6d9a9fd642146edb778ce1048"
+  },
+  "id": "6S705P8cxprOi0zA",
+  "tags": []
+}
